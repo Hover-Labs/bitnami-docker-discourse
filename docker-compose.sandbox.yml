@@ -1,0 +1,86 @@
+version: '2'
+services:
+  postgresql-sandbox:
+    image: docker.io/bitnami/postgresql:11
+    volumes:
+      - '/root/discourse-data/postgres-sandbox/:/bitnami/postgresql'
+    environment:
+      # ALLOW_EMPTY_PASSWORD is recommended only for development.
+      - ALLOW_EMPTY_PASSWORD=yes
+      - POSTGRESQL_USERNAME=bn_discourse
+      - POSTGRESQL_DATABASE=bitnami_discourse
+
+  redis-sandbox:
+    image: redis
+    volumes:
+      - '/root/discourse-data/redis-sandbox/:/data'      
+
+  discourse-sandbox:
+    image: docker.io/bitnami/discourse:2
+    volumes:
+      - '/root/discourse-data/discourse-sandbox-data/:/bitnami/discourse'
+    depends_on:
+      - postgresql-sandbox
+      - redis-sandbox
+    environment:
+      # ALLOW_EMPTY_PASSWORD is recommended only for development.
+      - ALLOW_EMPTY_PASSWORD=yes
+
+      - DISCOURSE_HOST=discuss-sandbox.kolibri.finance
+      - DISCOURSE_SITE_NAME=KolibriDAO Sandbox Gov Forum
+      - DISCOURSE_DATABASE_HOST=postgresql-sandbox
+      - DISCOURSE_DATABASE_PORT_NUMBER=5432
+      - DISCOURSE_DATABASE_USER=bn_discourse
+      - DISCOURSE_DATABASE_NAME=bitnami_discourse
+      - DISCOURSE_REDIS_HOST=redis-sandbox
+      - DISCOURSE_REDIS_PORT_NUMBER=6379
+
+      - POSTGRESQL_CLIENT_DATABASE_HOST=postgresql-sandbox
+      - POSTGRESQL_CLIENT_POSTGRES_USER=postgres
+      - POSTGRESQL_CLIENT_CREATE_DATABASE_NAME=bitnami_discourse
+      - POSTGRESQL_CLIENT_CREATE_DATABASE_EXTENSIONS=hstore,pg_trgm
+
+    env_file:
+      - discourse.sandbox.env
+
+  sidekiq-sandbox:
+    image: docker.io/bitnami/discourse:2
+    depends_on:
+      - discourse-sandbox
+    volumes:
+      - '/root/discourse-data/discourse-sandbox-data/:/bitnami/discourse'
+    command: /opt/bitnami/scripts/discourse-sidekiq/run.sh
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+      - DISCOURSE_HOST=discuss-sandbox.kolibri.finance
+      - DISCOURSE_DATABASE_HOST=postgresql-sandbox
+      - DISCOURSE_DATABASE_PORT_NUMBER=5432
+      - DISCOURSE_DATABASE_USER=bn_discourse
+      - DISCOURSE_DATABASE_NAME=bitnami_discourse
+      - DISCOURSE_REDIS_HOST=redis-sandbox
+      - DISCOURSE_REDIS_PORT_NUMBER=6379
+
+    env_file:
+      - discourse.sandbox.env
+
+  nginx:
+    image: nginx:1.15-alpine
+    command: "/bin/sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g \"daemon off;\"'"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx-sandbox:/etc/nginx/conf.d
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    depends_on:
+      - discourse-sandbox
+
+  certbot:
+    image: certbot/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    depends_on:
+      - nginx
